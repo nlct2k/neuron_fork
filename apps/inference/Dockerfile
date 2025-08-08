@@ -1,9 +1,11 @@
 ARG BUILD_TYPE
-ARG CUDA_VERSION=12.1.0
+ARG CUDA_VERSION=12.9.0
 ARG UBUNTU_VERSION=22.04
+
 
 # NON-CUDA base
 FROM python:3.10-slim AS base-nocuda
+
 
 # CUDA base
 FROM nvidia/cuda:${CUDA_VERSION}-runtime-ubuntu${UBUNTU_VERSION} AS base-cuda
@@ -23,18 +25,23 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/python3.10 /usr/bin/python
 
+
 # Main build stage
 FROM base-${BUILD_TYPE:-nocuda} AS final
+
 
 # Set working directory
 WORKDIR /app
 
+
 ENV HOST=0.0.0.0
+
 
 # Ignore hash sum mismatch for apt-get
 RUN echo "Acquire::http::Pipeline-Depth 0;" > /etc/apt/apt.conf.d/99custom && \
     echo "Acquire::http::No-Cache true;" >> /etc/apt/apt.conf.d/99custom && \
     echo "Acquire::BrokenProxy    true;" >> /etc/apt/apt.conf.d/99custom
+
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -44,26 +51,46 @@ RUN apt-get update && apt-get install -y \
     make \
     && rm -rf /var/lib/apt/lists/*
 
-# Install poetry
+
+# Upgrade pip and install poetry
+RUN pip install --upgrade pip
+RUN pip install --upgrade --force-reinstall attrs
 RUN pip install poetry
+
 
 ENV POETRY_VIRTUALENVS_CREATE=false
 RUN poetry config virtualenvs.create false
 
+
 # Copy the client package first
 COPY packages/python/neuronpedia-inference-client /app/packages/python/neuronpedia-inference-client/
+
 
 # Copy only poetry files
 COPY apps/inference/pyproject.toml apps/inference/poetry.lock* apps/inference/
 WORKDIR /app/apps/inference
 
-# Install only main dependencies
+
+# Clear pip cache and install dependencies with no cache
 ENV POETRY_REQUESTS_TIMEOUT=30
-RUN poetry install --only main
+ENV PIP_NO_CACHE_DIR=1
+ENV POETRY_INSTALLER_PARALLEL=false
+
+
+RUN pip install --upgrade --force-reinstall requests urllib3 && \
+    poetry install --only main --no-cache
+
+
+# Install PyTorch nightly AFTER poetry to prevent downgrade
+RUN pip install --force-reinstall --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu129
+
 
 # Now copy the rest of the application code
 COPY apps/inference /app/apps/inference/
 
+
 EXPOSE 5002
 
+
 CMD ["python", "start.py"]
+

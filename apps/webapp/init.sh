@@ -1,8 +1,11 @@
 #!/bin/bash
 
+
 set -a
-source .env
+source .env.localhost
 set +a
+
 
 # Start the Next.js application
 node server.js
+
