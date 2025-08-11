@@ -17,7 +17,55 @@ The system now supports running multiple inference servers concurrently, each au
 
 ## Files Changed
 
-### 1. `Makefile` (Primary Changes)
+### 1. `apps/webapp/lib/db/inference-host-source.ts` (Major Changes)
+
+#### Added Dynamic Server Discovery (lines 10-72):
+- **`discoverInferenceServers()`**: Automatically discovers running inference servers by checking ports 5002, 5005-5020 (skipping 5003, 5004)
+- **Caching System**: 30-second cache to avoid excessive health checks
+- **Health Check Integration**: Calls `/health` endpoint on each port to detect running servers
+
+#### Added Intelligent Model Matching (lines 74-141):
+- **`normalizeModelName()`**: Normalizes model names for better matching
+- **`isModelMatch()`**: Smart matching algorithm that handles variations like "gemma-2-2b" vs "gemma-2-2b-it"
+- **`getInferenceServerForModel()`**: Finds the best server for a specific model
+
+#### Added New Export Functions (lines 143-162):
+- **`getDynamicLocalhostInferenceHost()`**: Main function that returns the correct server URL for a model
+- **`clearInferenceServerCache()`**: Utility to refresh server discovery
+- **`getAllDiscoveredInferenceServers()`**: Debug function to see all discovered servers
+
+#### Modified All Host Selection Functions:
+All existing functions now use dynamic discovery when `USE_LOCALHOST_INFERENCE=true`:
+- `getOneRandomServerHostForSourceSet()` (line 191)
+- `getOneRandomServerHostForSource()` (line 210) 
+- `getOneRandomServerHostForModel()` (line 223)
+- `getTwoRandomServerHostsForModel()` (line 238)
+- `getTwoRandomServerHostsForSourceSet()` (line 268)
+
+### 2. `apps/inference/neuronpedia_inference/server.py` (Enhanced Health Endpoint)
+
+#### Modified Health Endpoint (lines 98-108):
+```python
+@app.get("/health")
+async def health_check():
+    from neuronpedia_inference.config import config
+    return {
+        "status": "healthy",
+        "model_id": config.model_id,
+        "override_model_id": getattr(config, 'override_model_id', None),
+        "custom_hf_model_id": getattr(config, 'custom_hf_model_id', None),
+        "sae_sets": getattr(config, 'sae_sets', []),
+        "port": getattr(config, 'port', 5002)
+    }
+```
+
+### 3. `apps/webapp/app/api/admin/inference-servers/route.ts` (New Debug API)
+
+#### Added Admin Endpoint for Server Discovery:
+- **GET**: Returns all discovered inference servers with their details
+- **POST** with `{"action": "refresh"}`: Clears cache and rediscovers servers
+
+### 4. `Makefile` (Primary Changes)
 
 #### Modified Commands:
 
@@ -122,7 +170,40 @@ if args.auto_port:
         print(f"Using requested port {args.port}")
 ```
 
-## How It Works
+## How the Dynamic System Works
+
+### Automatic Server Discovery
+
+The webapp now automatically discovers running inference servers by:
+
+1. **Health Check Scanning**: Every 30 seconds, scans ports 5002, 5005-5020 (skipping 5003, 5004)
+2. **Model Information Extraction**: Each server's `/health` endpoint returns model details
+3. **Intelligent Matching**: When a request comes for a specific model, finds the best matching server
+4. **Fallback Handling**: If no exact match, uses the first available server
+
+### Model Matching Algorithm
+
+The system uses smart matching to handle model name variations:
+
+```typescript
+// Examples of successful matches:
+"gpt2-small" → server running "gpt2-small" 
+"gemma-2-2b" → server running "gemma-2-2b-it" (close match)
+"deepseek-r1" → server running "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+```
+
+### Request Flow
+
+```
+1. User searches "cats" on Gemma-2-2B page
+2. Webapp calls getDynamicLocalhostInferenceHost("gemma-2-2b")
+3. System discovers: 
+   - Port 5002: gpt2-small
+   - Port 5005: gemma-2-2b-it
+4. Matches "gemma-2-2b" → "gemma-2-2b-it" (compatible)
+5. Returns "http://127.0.0.1:5005"
+6. Request goes to correct server!
+```
 
 ### Port Assignment Logic
 
@@ -191,12 +272,14 @@ neuronpedia-inference-gemma_2_2b_it_gemmascope    neuronpedia-inference      0.0
 
 ## Benefits
 
-1. **Scalability**: Start as many servers as needed without manual port management
-2. **Isolation**: Each server runs independently with its own container
-3. **Simplicity**: No need to specify ports manually
-4. **Safety**: Reserved ports are automatically avoided
-5. **Management**: Easy monitoring and control of multiple servers
-6. **Compatibility**: Existing workflows continue to work unchanged
+1. **🎯 Perfect Request Routing**: Each model page automatically routes to its correct inference server
+2. **🔍 Automatic Discovery**: No manual configuration - webapp finds servers automatically  
+3. **🚀 True Scalability**: Start unlimited servers without conflicts or port management
+4. **🔒 Independent Operation**: Each server runs isolated with its own container and model
+5. **🧠 Smart Matching**: Handles model name variations intelligently
+6. **⚡ Performance**: 30-second caching prevents excessive health checks
+7. **🛠️ Easy Debugging**: Admin API to monitor discovered servers
+8. **🔄 Backward Compatible**: Existing workflows work unchanged
 
 ## Technical Notes
 
@@ -220,6 +303,37 @@ The safe naming logic handles this conversion automatically.
 
 ## Troubleshooting
 
+### Dynamic Discovery Issues
+
+**Problem**: Webapp can't find inference servers
+```bash
+# Check if USE_LOCALHOST_INFERENCE is set
+grep USE_LOCALHOST_INFERENCE .env.localhost
+
+# Check server discovery via admin API
+curl http://localhost:3000/api/admin/inference-servers
+
+# Check individual server health
+curl http://localhost:5002/health
+curl http://localhost:5005/health
+```
+
+**Problem**: Wrong server getting requests
+```bash
+# Clear server cache
+curl -X POST http://localhost:3000/api/admin/inference-servers \
+  -H "Content-Type: application/json" \
+  -d '{"action": "refresh"}'
+```
+
+**Problem**: Model matching not working
+Check the server logs for model matching decisions:
+```bash
+# Look for these log messages in webapp:
+"Found matching server for gpt2-small: gpt2-small@5002"
+"Using fallback server for unknown-model: gpt2-small@5002"
+```
+
 ### Port Detection Issues
 If port detection fails, ensure Python 3 is available and the socket module works correctly.
 
@@ -231,6 +345,14 @@ docker ps -a --filter "name=neuronpedia-inference-"
 
 ### Project Name Issues
 If Docker Compose complains about project names, verify the name contains only valid characters (letters, numbers, underscores).
+
+### Performance Issues
+If discovery is slow, check the health endpoint response times:
+```bash
+time curl http://localhost:5002/health
+```
+
+Health checks timeout after 2 seconds, so slow responses might cause discovery issues.
 
 ## Future Enhancements
 

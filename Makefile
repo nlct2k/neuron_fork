@@ -187,10 +187,7 @@ inference-list-configs: ## Inference: List Configurations (possible values for M
 		echo ""; \
 	done
 
-inference-status: ## Inference: Show running inference servers and their ports
-	@echo "Running Neuronpedia Inference Servers:"
-	@echo "======================================"
-	@docker ps --filter "name=neuronpedia-inference-" --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}" || echo "No inference servers running"
+
 
 inference-stop-all: ## Inference: Stop all running inference servers  
 	@echo "Stopping all neuronpedia inference servers..."

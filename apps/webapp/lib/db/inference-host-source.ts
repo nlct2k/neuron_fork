@@ -42,10 +42,17 @@ async function discoverInferenceServers(): Promise<InferenceServerInfo[]> {
     portsToCheck.map(async (port) => {
       try {
         const url = `${baseUrl}:${port}`;
+        
+        // Create timeout signal that works in older Node versions
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        
         const healthResponse = await fetch(`${url}/health`, {
           method: 'GET',
-          signal: AbortSignal.timeout(2000), // 2 second timeout
+          signal: controller.signal,
         });
+        
+        clearTimeout(timeoutId);
 
         if (healthResponse.ok) {
           const healthData = await healthResponse.json();
@@ -72,6 +79,48 @@ async function discoverInferenceServers(): Promise<InferenceServerInfo[]> {
 }
 
 /**
+ * Normalize model names for better matching
+ */
+function normalizeModelName(modelName: string): string {
+  return modelName
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .replace(/small/g, '')
+    .replace(/large/g, '')
+    .replace(/instruct/g, 'it')
+    .replace(/instruction/g, 'it');
+}
+
+/**
+ * Check if two model names are similar enough to be considered a match
+ */
+function isModelMatch(serverModel: string, requestedModel: string): boolean {
+  // Exact match
+  if (serverModel === requestedModel) return true;
+  
+  // Normalized match
+  const normalizedServer = normalizeModelName(serverModel);
+  const normalizedRequested = normalizeModelName(requestedModel);
+  if (normalizedServer === normalizedRequested) return true;
+  
+  // Partial matches
+  const serverParts = normalizeModelName(serverModel).split(/[-_]/);
+  const requestedParts = normalizeModelName(requestedModel).split(/[-_]/);
+  
+  // Check if most significant parts match (e.g., "gpt2", "gemma2", "llama")
+  const serverCore = serverParts[0];
+  const requestedCore = requestedParts[0];
+  
+  if (serverCore === requestedCore) {
+    // For models like "gemma-2-2b" vs "gemma-2-2b-it"
+    const commonParts = serverParts.filter(part => requestedParts.includes(part));
+    return commonParts.length >= 2; // At least 2 parts in common
+  }
+  
+  return false;
+}
+
+/**
  * Get the best inference server for a specific model
  */
 async function getInferenceServerForModel(modelId: string): Promise<string | null> {
@@ -79,20 +128,23 @@ async function getInferenceServerForModel(modelId: string): Promise<string | nul
   
   // First, try to find exact model match
   const exactMatch = servers.find(server => 
-    server.health && (
-      server.modelId === modelId ||
-      server.modelId.includes(modelId) ||
-      modelId.includes(server.modelId)
-    )
+    server.health && isModelMatch(server.modelId, modelId)
   );
   
   if (exactMatch) {
+    console.log(`Found matching server for ${modelId}: ${exactMatch.modelId}@${exactMatch.port}`);
     return exactMatch.url;
   }
 
   // If no exact match, return the first available server
   const fallback = servers.find(server => server.health);
-  return fallback ? fallback.url : null;
+  if (fallback) {
+    console.log(`Using fallback server for ${modelId}: ${fallback.modelId}@${fallback.port}`);
+    return fallback.url;
+  }
+  
+  console.warn(`No inference servers found for model ${modelId}`);
+  return null;
 }
 
 /**
