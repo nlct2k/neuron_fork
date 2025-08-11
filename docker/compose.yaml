@@ -65,10 +65,10 @@ services:
       dockerfile: apps/inference/Dockerfile
       args:
         BUILD_TYPE: ${BUILD_TYPE:-nocuda} # Use nocuda by default, override with BUILD_TYPE=cuda
-        CUDA_VERSION: "12.1.0"
+        CUDA_VERSION: "12.9.0"
         UBUNTU_VERSION: "22.04"
     ports:
-      - "5002:5002"
+      - "${COMPOSE_PORT_OVERRIDE:-5002:5002}"
     env_file:
       - ${ENV_FILE:-${MODEL_SOURCESET:+.env.inference.${MODEL_SOURCESET}}.env}
     environment:
@@ -84,7 +84,7 @@ services:
       dockerfile: apps/autointerp/Dockerfile
       args:
         BUILD_TYPE: ${BUILD_TYPE:-nocuda}
-        CUDA_VERSION: "12.1.0"
+        CUDA_VERSION: "12.9.0"
         UBUNTU_VERSION: "22.04"
     ports:
       - "5003:5003"

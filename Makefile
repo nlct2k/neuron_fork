@@ -144,6 +144,15 @@ inference-localhost-dev: ## Inference: Localhost Environment - Run (Development 
 			exit 1; \
 		fi; \
 		echo "Using model configuration: .env.inference.$(MODEL_SOURCESET)"; \
+		echo "Finding available port (skipping 5003, 5004)..."; \
+		PORT=$$(python3 -c "import socket; exec('def find_port():\\n    for p in range(5002, 65535):\\n        if p in [5003, 5004]: continue\\n        try:\\n            s = socket.socket(); s.bind((\\\"127.0.0.1\\\", p)); s.close(); return p\\n        except: continue\\n    return None\\nprint(find_port())')"); \
+		echo "Using port: $$PORT"; \
+		SAFE_MODEL_NAME=$$(echo "$(MODEL_SOURCESET)" | sed 's/[^a-zA-Z0-9]/_/g' | tr '[:upper:]' '[:lower:]'); \
+		CONTAINER_NAME="neuronpedia-inference-$$SAFE_MODEL_NAME"; \
+		echo "Container name: $$CONTAINER_NAME"; \
+		echo "Starting server on port $$PORT..."; \
+		export COMPOSE_PORT_OVERRIDE="$$PORT:5002"; \
+		export COMPOSE_PROJECT_NAME="neuronpedia_$$SAFE_MODEL_NAME"; \
 		RELOAD=$$([ "$(AUTORELOAD)" = "1" ] && echo "1" || echo "0") \
 		ENV_FILE=../.env.inference.$(MODEL_SOURCESET) \
 			docker compose \
@@ -177,6 +186,15 @@ inference-list-configs: ## Inference: List Configurations (possible values for M
 		echo "    \033[1;35mmake inference-localhost-dev-gpu MODEL_SOURCESET=$$name\033[0m"; \
 		echo ""; \
 	done
+
+inference-status: ## Inference: Show running inference servers and their ports
+	@echo "Running Neuronpedia Inference Servers:"
+	@echo "======================================"
+	@docker ps --filter "name=neuronpedia-inference-" --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}" || echo "No inference servers running"
+
+inference-stop-all: ## Inference: Stop all running inference servers  
+	@echo "Stopping all neuronpedia inference servers..."
+	@docker stop $$(docker ps -q --filter "name=neuronpedia-inference-") 2>/dev/null || echo "No inference servers to stop"
 
 autointerp-localhost-install: ## Autointerp: Localhost Environment - Install Dependencies (Development Build)
 	@echo "Installing the autointerp dependencies for development in the localhost environment..."

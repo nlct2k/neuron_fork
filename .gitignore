@@ -142,3 +142,4 @@ dist
 .secrets*
 
 CLAUDE.local.md
+.env.localhost

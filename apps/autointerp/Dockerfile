@@ -1,5 +1,5 @@
 ARG BUILD_TYPE
-ARG CUDA_VERSION=12.1.0
+ARG CUDA_VERSION=12.9.0
 ARG UBUNTU_VERSION=22.04
 
 # NON-CUDA base
@@ -44,7 +44,9 @@ RUN apt-get update && apt-get install -y \
     make \
     && rm -rf /var/lib/apt/lists/*
 
-# Install poetry
+# Upgrade pip and install poetry
+RUN pip install --upgrade pip
+RUN pip install --upgrade --force-reinstall attrs
 RUN pip install poetry
 
 ENV POETRY_VIRTUALENVS_CREATE=false
@@ -57,9 +59,16 @@ COPY packages/python/neuronpedia-autointerp-client /app/packages/python/neuronpe
 COPY apps/autointerp/pyproject.toml apps/autointerp/poetry.lock* apps/autointerp/
 WORKDIR /app/apps/autointerp
 
-# Install only main dependencies
+# Clear pip cache and install dependencies with no cache
 ENV POETRY_REQUESTS_TIMEOUT=30
-RUN poetry install --only main
+ENV PIP_NO_CACHE_DIR=1
+ENV POETRY_INSTALLER_PARALLEL=false
+
+RUN pip install --upgrade --force-reinstall requests urllib3 && \
+    poetry install --only main --no-cache
+
+# Install PyTorch nightly AFTER poetry to prevent downgrade
+RUN pip install --force-reinstall --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu129
 
 # Now copy the rest of the application code
 COPY apps/autointerp /app/apps/autointerp/

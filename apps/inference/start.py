@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import subprocess
+import socket
 
 
 def parse_args():
@@ -115,11 +116,47 @@ def parse_args():
         action="store_true",
         help="Use nnsight. Not all models are currently supported.",
     )
+    parser.add_argument(
+        "--auto-port",
+        action="store_true",
+        help="Automatically detect next available port starting from --port (skips 5003, 5004)",
+    )
     return parser.parse_args()
+
+
+def is_port_in_use(port, host='127.0.0.1'):
+    """Check if a port is already in use."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind((host, port))
+            return False
+        except OSError:
+            return True
+
+
+def find_next_available_port(start_port=5002, skip_ports=[5003, 5004]):
+    """Find the next available port starting from start_port, skipping specified ports."""
+    port = start_port
+    while True:
+        if port not in skip_ports and not is_port_in_use(port):
+            return port
+        port += 1
+        # Safety check to avoid infinite loop
+        if port > 65535:
+            raise RuntimeError("No available ports found")
 
 
 def main():
     args = parse_args()
+
+    # Auto port detection if requested
+    if args.auto_port:
+        available_port = find_next_available_port(start_port=args.port)
+        if available_port != args.port:
+            print(f"Port {args.port} is in use, using port {available_port} instead")
+            args.port = available_port
+        else:
+            print(f"Using requested port {args.port}")
 
     # Only set environment variables if they don't already exist
     if "MODEL_ID" not in os.environ:
