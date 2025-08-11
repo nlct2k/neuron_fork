@@ -107,6 +107,21 @@ export async function getDynamicLocalhostInferenceHost(modelId?: string): Promis
   return dynamicHost || LOCALHOST_INFERENCE_HOST;
 }
 
+/**
+ * Clear the cached servers (useful for testing or when servers change)
+ */
+export function clearInferenceServerCache(): void {
+  _cachedServers = [];
+  _lastDiscovery = 0;
+}
+
+/**
+ * Get all discovered inference servers (for debugging/monitoring)
+ */
+export async function getAllDiscoveredInferenceServers(): Promise<InferenceServerInfo[]> {
+  return await discoverInferenceServers();
+}
+
 export const createInferenceHostSource = async (input: InferenceHostSource) =>
   prisma.inferenceHostSource.create({
     data: {
