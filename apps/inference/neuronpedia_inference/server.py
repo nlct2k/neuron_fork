@@ -97,7 +97,15 @@ app.include_router(v1_router)
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    from neuronpedia_inference.config import config
+    return {
+        "status": "healthy",
+        "model_id": config.model_id,
+        "override_model_id": getattr(config, 'override_model_id', None),
+        "custom_hf_model_id": getattr(config, 'custom_hf_model_id', None),
+        "sae_sets": getattr(config, 'sae_sets', []),
+        "port": getattr(config, 'port', 5002)
+    }
 
 
 @app.post("/initialize")
